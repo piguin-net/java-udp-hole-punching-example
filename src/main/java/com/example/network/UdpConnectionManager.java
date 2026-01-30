@@ -1,4 +1,4 @@
-package com.example.network.local;
+package com.example.network;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;

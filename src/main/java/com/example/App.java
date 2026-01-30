@@ -28,8 +28,8 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeSelectionModel;
 
+import com.example.network.UdpConnectionManager;
 import com.example.network.local.BeconManager;
-import com.example.network.local.UdpConnectionManager;
 
 /**
  * Hello world!
