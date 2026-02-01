@@ -40,6 +40,7 @@ import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 
 import com.example.network.UdpConnectionManager;
+import com.example.network.UdpConnectionManager.UdpConnection;
 import com.example.network.global.StunClient;
 import com.example.network.local.BeconManager;
 
@@ -130,7 +131,6 @@ public class App extends JFrame
     }
 
     private final Charset CHARSET = Charset.forName("utf-8");
-    private UdpConnectionManager udp;
     private BeconManager becon;
     private final SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
     private final InetSocketAddress stun = new InetSocketAddress(
@@ -289,7 +289,7 @@ public class App extends JFrame
                                 InetSocketAddress addr = new InetSocketAddress(parts[0], Integer.valueOf(parts[1]));
                                 NetworkArea area = addr.getAddress().isSiteLocalAddress() ? NetworkArea.LAN : NetworkArea.WAN;
                                 tree.add(addr, area, NetworkStatus.Connecting);
-                                udp.add(addr);
+                                connect(addr).start();
                                 input.setText("");
                                 connectDialog.setVisible(false);
                             }
@@ -300,9 +300,11 @@ public class App extends JFrame
         }});
     }
 
-    private void setupNetwork() throws IOException {
-        this.udp = new UdpConnectionManager().onConnect(
-            host -> {
+    private UdpConnection connect(InetSocketAddress host) {
+        return UdpConnectionManager.add(
+            host
+        ).onConnect(
+            () -> {
                 if (host.equals(stun)) return;
                 NetworkArea area = host.getAddress().isSiteLocalAddress() ? NetworkArea.LAN : NetworkArea.WAN;
                 this.tree.update(host, area, NetworkStatus.Connected);
@@ -312,20 +314,34 @@ public class App extends JFrame
                 }
             }
         ).onDisconnect(
-            host -> {
+            () -> {
                 if (host.equals(stun)) return;
                 NetworkArea area = host.getAddress().isSiteLocalAddress() ? NetworkArea.LAN : NetworkArea.WAN;
                 this.tree.update(host, area, NetworkStatus.Connecting);
             }
         ).onReceive(
             // message
-            (host, data) -> {
+            (data) -> {
                 if (!this.cache.containsKey(host)) this.cache.put(host, "");
                 String now = this.formatter.format(new Date());
                 this.cache.put(host, String.format("%s%s -> %s\n", history.getText(), now, new String(data, CHARSET)));
                 if (host.equals(this.selection)) history.setText(this.cache.get(host));
             }
-        ).onReceive(stun, data -> {
+        );
+    }
+
+    private void setupNetwork() throws IOException {
+        long interval = Long.getLong("stun.interval", 3_000);
+        long timeout = Long.getLong("stun.timeout", interval * 3);
+
+        UdpConnectionManager.add(
+            stun
+        ).config(
+            interval,
+            timeout
+        ).generator(
+            () -> StunClient.generateRequest()
+        ).onReceive(data -> {
             // stun response
             try {
                 InetSocketAddress mapped = StunClient.parseResponse(ByteBuffer.wrap(data));
@@ -335,27 +351,27 @@ public class App extends JFrame
                 logger.log(Level.ERROR, "invalid stun response", e);
             }
         });
-        this.udp.add(stun, () -> StunClient.generateRequest());
-        this.udp.start();
+        UdpConnectionManager.start();
 
         this.becon = new BeconManager(
-            udp.getPort()
+            UdpConnectionManager.getPort()
         ).onReceive(
             host -> {
                 Map<InetSocketAddress, HostTreeNode> mapping = this.tree.getMapping(NetworkArea.LAN);
                 if (!mapping.containsKey(host)) {
                     this.tree.add(host, NetworkArea.LAN, NetworkStatus.Connecting);
-                    this.udp.add(host);
+                    connect(host).start();
                 }
             }
         );
         this.becon.start();
-        this.listen.put(NetworkArea.LAN, new InetSocketAddress("0.0.0.0", this.udp.getPort()));
+
+        this.listen.put(NetworkArea.LAN, new InetSocketAddress("0.0.0.0", UdpConnectionManager.getPort()));
     }
 
     private void sendMessage() {
         try {
-            this.udp.send(this.selection, ByteBuffer.wrap(message.getText().getBytes(CHARSET)));
+            UdpConnectionManager.get(this.selection).send(ByteBuffer.wrap(message.getText().getBytes(CHARSET)));
             String now = this.formatter.format(new Date());
             history.setText(String.format("%s%s <- %s\n", history.getText(), now, message.getText()));
             message.setText("");
