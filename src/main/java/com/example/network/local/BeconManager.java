@@ -17,12 +17,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
+
 import com.example.Utils;
 
 /**
  * Multicast becon manager.
  */
 public class BeconManager {
+    private final Logger logger = System.getLogger(this.getClass().getName());
     private final int USHORT_MAX_VALUE = (1 << 16) - 1;
     private final Integer p2pPort;
     private final InetAddress multicastAddr;
@@ -38,14 +42,20 @@ public class BeconManager {
         this.p2pPort = p2pPort;
         this.multicastAddr = InetAddress.getByName(System.getProperty("multicast.addr", "224.0.0.1"));
         this.multicastPort = Integer.getInteger("multicast.port", 12345);
-        this.interval = Long.getLong("multicast.interval", 1000);
+        this.interval = Long.getLong("multicast.interval", 1_000);
 
         this.channel = DatagramChannel.open();
         this.channel.configureBlocking(false);
         this.channel.socket().bind(new InetSocketAddress(this.multicastPort));
 
+        logger.log(Level.INFO, "local p2p port     : {0}", p2pPort);
+        logger.log(Level.INFO, "multicast addr     : {0}", multicastAddr);
+        logger.log(Level.INFO, "multicast port     : {0}", multicastPort);
+        logger.log(Level.INFO, "multicast interval : {0}", interval);
+
         for (NetworkInterface nic: this.getSiteLocalNetworkInterfaces().keySet()) {
             this.channel.join(this.multicastAddr, nic);
+            logger.log(Level.INFO, "multicast nic      : {0}", nic.getName());
         }
     }
 
@@ -72,6 +82,7 @@ public class BeconManager {
 
     public void start() throws SocketException, IOException {
         if (this.active) return;
+        logger.log(Level.INFO, "start becon manager");
 
         this.sender = new Thread(() -> {
             InetSocketAddress addr = new InetSocketAddress(this.multicastAddr, this.multicastPort);
@@ -80,6 +91,7 @@ public class BeconManager {
                 try {
                     long now = new Date().getTime();
                     if (now - last > this.interval) {
+                        logger.log(Level.DEBUG, "send becon to {0}", Utils.format(addr));
                         ByteBuffer data = ByteBuffer
                             .allocate(Short.BYTES)
                             .putShort(this.p2pPort.shortValue())
@@ -89,10 +101,10 @@ public class BeconManager {
                     }
                     Thread.sleep(1);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    logger.log(Level.ERROR, "becon send error", e);
                 }
             }
-        });
+        }, "Becon Sender");
 
         this.receiver = new Thread(() -> {
             while (this.active) {
@@ -107,6 +119,7 @@ public class BeconManager {
                             int size = buffer.flip().limit();
                             if (size == Short.BYTES) {
                                 int port = Utils.ushort2int(buffer.getShort());
+                                logger.log(Level.DEBUG, "receive becon from {0} (p2p port = {1})", Utils.format(addr), port);
                                 InetSocketAddress host = new InetSocketAddress(addr.getAddress(), port);
                                 if (this.onReceiveEventListener != null) {
                                     // TODO: 例外、別Thread
@@ -117,10 +130,10 @@ public class BeconManager {
                     }
                     Thread.sleep(1);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    logger.log(Level.ERROR, "becon receive error", e);
                 }
             }
-        });
+        }, "Becon Receiver");
 
         this.active = true;
         this.receiver.start();
@@ -129,6 +142,7 @@ public class BeconManager {
 
     public void stop() throws InterruptedException, IOException {
         if (!this.active) return;
+        logger.log(Level.INFO, "stop becon manager");
         this.active = false;
         this.sender.join();
         this.receiver.join();
