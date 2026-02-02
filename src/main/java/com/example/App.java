@@ -258,7 +258,6 @@ public class App extends JFrame
                 if (el != null && el.getConnection().getHost().equals(host)) {
                     this.message.setEnabled(false);
                     this.send.setEnabled(false);
-                    this.history.setText("");
                 }
             }
         ).onReceive(
