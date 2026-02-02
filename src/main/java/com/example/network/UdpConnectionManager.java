@@ -43,16 +43,9 @@ public class UdpConnectionManager {
         private Status status;
 
         public enum Status {
-            Connecting("⛅"),
-            Connected("☀"),
-            Disconnected("☔");
-            private String icon;
-            public String getIcon() {
-                return this.icon;
-            }
-            private Status(String icon) {
-                this.icon = icon;
-            }
+            Connecting,
+            Connected,
+            Disconnected;
         }
 
         public UdpConnection(InetSocketAddress host) {

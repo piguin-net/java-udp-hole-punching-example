@@ -2,6 +2,7 @@ package com.example;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
@@ -31,8 +32,10 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 
 import java.lang.System.Logger;
@@ -60,6 +63,7 @@ public class App extends JFrame
     private static class UdpConnectionElement {
         private UdpConnection connection;
         private String history = "";
+        private boolean unread = false;
         public UdpConnection getConnection() {
             return connection;
         }
@@ -72,9 +76,40 @@ public class App extends JFrame
         public UdpConnectionElement(UdpConnection connection) {
             this.connection = connection;
         }
+        public void setUnread(boolean unread) {
+            this.unread = unread;
+        }
         @Override
         public String toString() {
-            return Utils.format(this.connection.getHost());
+            return Utils.format(this.connection.getHost()) + (this.unread ? "(!)" : "");
+        }
+    }
+
+    private static class HostCellRenderer extends JLabel implements ListCellRenderer<UdpConnectionElement> {
+        public HostCellRenderer() {
+            super();
+            this.setOpaque(true);
+        }
+        @Override
+        public Component getListCellRendererComponent(JList<? extends UdpConnectionElement> instance,
+                UdpConnectionElement el, int index, boolean selected, boolean focus) {
+            this.setText(el.toString());
+            switch(el.getConnection().getStatus()) {
+                case Connecting:
+                    this.setBackground(Color.yellow);
+                    break;
+                case Connected:
+                    this.setBackground(Color.green);
+                    break;
+                case Disconnected:
+                    this.setBackground(Color.pink);
+                    break;
+                default:
+                    this.setBackground(Color.white);
+                    break;
+            }
+            this.setForeground(selected ? Color.black : Color.gray);
+            return this;
         }
     }
 
@@ -157,6 +192,7 @@ public class App extends JFrame
             }});
         }});
 
+        this.list.setCellRenderer(new HostCellRenderer());
         this.list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         this.list.addListSelectionListener(e -> {
             UdpConnectionElement el = this.list.getSelectedValue();
@@ -165,6 +201,8 @@ public class App extends JFrame
                 boolean isConnected = Status.Connected.equals(el.getConnection().getStatus());
                 message.setEnabled(isConnected);
                 send.setEnabled(isConnected);
+                el.setUnread(false);
+                list.repaint();
             } else {
                 history.setText("");
                 message.setEnabled(false);
@@ -202,13 +240,15 @@ public class App extends JFrame
         this.send.setEnabled(false);
 
         this.layout.add(menubar, BorderLayout.PAGE_START);
-        this.layout.add(new JScrollPane(list), BorderLayout.LINE_START);
-        this.layout.add(new JPanel(new BorderLayout()) {{
-            this.add(history, BorderLayout.CENTER);
-            this.add(new JPanel(new BorderLayout()) {{
-                this.add(message, BorderLayout.CENTER);
-                this.add(send, BorderLayout.LINE_END);
-            }}, BorderLayout.PAGE_END);
+        this.layout.add(new JSplitPane() {{
+            this.setLeftComponent(new JScrollPane(list));
+            this.setRightComponent(new JPanel(new BorderLayout()) {{
+                this.add(history, BorderLayout.CENTER);
+                this.add(new JPanel(new BorderLayout()) {{
+                    this.add(message, BorderLayout.CENTER);
+                    this.add(send, BorderLayout.LINE_END);
+                }}, BorderLayout.PAGE_END);
+            }});
         }}, BorderLayout.CENTER);
         this.layout.add(info, BorderLayout.PAGE_END);
         this.getContentPane().add(this.layout);
@@ -251,6 +291,7 @@ public class App extends JFrame
                     this.message.setEnabled(true);
                     this.send.setEnabled(true);
                 }
+                this.list.repaint();
             }
         ).onDisconnect(
             () -> {
@@ -259,6 +300,7 @@ public class App extends JFrame
                     this.message.setEnabled(false);
                     this.send.setEnabled(false);
                 }
+                this.list.repaint();
             }
         ).onReceive(
             // message
@@ -269,12 +311,15 @@ public class App extends JFrame
                     UdpConnectionElement el = enumeration.nextElement();
                     if (el.getConnection().getHost().equals(host)) {
                         el.setHistory(String.format("%s%s -> %s\n", el.getHistory(), now, new String(data, CHARSET)));
+                        el.setUnread(true);
                     }
                 }
                 UdpConnectionElement el = this.list.getSelectedValue();
                 if (el != null && el.getConnection().getHost().equals(host)) {
                     this.history.setText(el.getHistory());
+                    el.setUnread(false);
                 }
+                this.list.repaint();
             }
         );
     }
