@@ -15,32 +15,32 @@ import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
+import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.JTree;
-import javax.swing.event.TreeSelectionEvent;
-import javax.swing.event.TreeSelectionListener;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
-import javax.swing.tree.TreeSelectionModel;
+import javax.swing.ListSelectionModel;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 
 import com.example.network.UdpConnectionManager;
 import com.example.network.UdpConnectionManager.UdpConnection;
+import com.example.network.UdpConnectionManager.UdpConnection.Status;
 import com.example.network.global.StunClient;
 import com.example.network.local.BeconManager;
 
@@ -57,76 +57,24 @@ public class App extends JFrame
         WAN;
     };
 
-    private enum NetworkStatus {
-        Connecting("⛅"),
-        Connected("☀");
-        private String icon;
-        public String getIcon() {
-            return this.icon;
+    private static class UdpConnectionElement {
+        private UdpConnection connection;
+        private String history = "";
+        public UdpConnection getConnection() {
+            return connection;
         }
-        private NetworkStatus(String icon) {
-            this.icon = icon;
+        public String getHistory() {
+            return history;
         }
-    }
-
-    private static class HostTreeNode extends DefaultMutableTreeNode {
-        private final InetSocketAddress host;
-        private NetworkStatus status;
-        public InetSocketAddress getHost() {
-            return this.host;
+        public void setHistory(String history) {
+            this.history = history;
         }
-        public NetworkStatus getStatus() {
-            return this.status;
+        public UdpConnectionElement(UdpConnection connection) {
+            this.connection = connection;
         }
-        public void setStatus(NetworkStatus status) {
-            this.status = status;
-            this.setUserObject(String.format("%s(%s)", Utils.format(host), status.getIcon()));
-        }
-        public HostTreeNode(InetSocketAddress host, NetworkStatus status) {
-            super();
-            this.host = host;
-            this.setStatus(status);
-        }
-    }
-
-    // TODO: thread safe
-    private static class JNodeTree extends JTree {
-        private Map<NetworkArea, DefaultMutableTreeNode> networks = new HashMap<>() {{
-            this.put(NetworkArea.LAN, new DefaultMutableTreeNode(NetworkArea.LAN.name()));
-            this.put(NetworkArea.WAN, new DefaultMutableTreeNode(NetworkArea.WAN.name()));
-        }};
-        private DefaultTreeModel model = new DefaultTreeModel(new DefaultMutableTreeNode("Area") {{
-            this.add(networks.get(NetworkArea.LAN));
-            this.add(networks.get(NetworkArea.WAN));
-        }}, false);
-        public JNodeTree() {
-            super();
-            this.setModel(this.model);
-        }
-        public void add(InetSocketAddress host, NetworkArea area, NetworkStatus status) {
-            Map<InetSocketAddress, HostTreeNode> mapping = this.getMapping(area);
-            if (mapping.containsKey(host)) {
-                this.update(host, area, status);
-            } else {
-                this.networks.get(area).add(new HostTreeNode(host, status));
-                this.model.reload();
-            }
-        }
-        public void update(InetSocketAddress host, NetworkArea area, NetworkStatus status) {
-            Map<InetSocketAddress, HostTreeNode> mapping = this.getMapping(area);
-            if (mapping.containsKey(host)) {
-                mapping.get(host).setStatus(status);
-            }
-        }
-        public Map<InetSocketAddress, HostTreeNode> getMapping(NetworkArea area) {
-            return new HashMap<>() {{
-                DefaultMutableTreeNode network = networks.get(area);
-                for (int i = 0; i < network.getChildCount(); i++) {
-                    if (network.getChildAt(i) instanceof HostTreeNode node) {
-                        this.put(node.getHost(), node);
-                    }
-                }
-            }};
+        @Override
+        public String toString() {
+            return Utils.format(this.connection.getHost());
         }
     }
 
@@ -158,14 +106,13 @@ public class App extends JFrame
     }, "UI refresh");
 
     private JMenuBar menubar = new JMenuBar();
-    private JNodeTree tree = new JNodeTree();
+    private DefaultListModel<UdpConnectionElement> hosts = new DefaultListModel<>();
+    private JList<UdpConnectionElement> list = new JList<>(hosts);
     private JTextArea history = new JTextArea();
     private JTextField message = new JTextField();
     private JButton send = new JButton("Send");
     private JLabel info = new JLabel();
     private JPanel layout = new JPanel(new BorderLayout());
-    private InetSocketAddress selection = null;
-    private Map<InetSocketAddress, String> cache = new HashMap<>();
     private Map<NetworkArea, InetSocketAddress> listen = new HashMap<>();
     private JDialog connectDialog = new JDialog(this, "Connect to", true);
 
@@ -210,24 +157,18 @@ public class App extends JFrame
             }});
         }});
 
-        this.tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
-        this.tree.addTreeSelectionListener(new TreeSelectionListener() {
-            @Override
-            public void valueChanged(TreeSelectionEvent e) {
-                Object[] path = e.getPath().getPath();
-                if (path.length == 3 && path[2] instanceof HostTreeNode node) {
-                    selection = node.getHost();
-                    if (!cache.containsKey(selection)) cache.put(selection, "");
-                    history.setText(cache.get(selection));
-                    boolean isConnected = NetworkStatus.Connected.equals(node.getStatus());
-                    message.setEnabled(isConnected);
-                    send.setEnabled(isConnected);
-                } else {
-                    selection = null;
-                    history.setText("");
-                    message.setEnabled(false);
-                    send.setEnabled(false);
-                }
+        this.list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        this.list.addListSelectionListener(e -> {
+            UdpConnectionElement el = this.list.getSelectedValue();
+            if (el != null) {
+                history.setText(el.getHistory());
+                boolean isConnected = Status.Connected.equals(el.getConnection().getStatus());
+                message.setEnabled(isConnected);
+                send.setEnabled(isConnected);
+            } else {
+                history.setText("");
+                message.setEnabled(false);
+                send.setEnabled(false);
             }
         });
 
@@ -261,7 +202,7 @@ public class App extends JFrame
         this.send.setEnabled(false);
 
         this.layout.add(menubar, BorderLayout.PAGE_START);
-        this.layout.add(tree, BorderLayout.LINE_START);
+        this.layout.add(new JScrollPane(list), BorderLayout.LINE_START);
         this.layout.add(new JPanel(new BorderLayout()) {{
             this.add(history, BorderLayout.CENTER);
             this.add(new JPanel(new BorderLayout()) {{
@@ -287,9 +228,9 @@ public class App extends JFrame
                             String[] parts = input.getText().split(":");
                             if (parts.length == 2) {
                                 InetSocketAddress addr = new InetSocketAddress(parts[0], Integer.valueOf(parts[1]));
-                                NetworkArea area = addr.getAddress().isSiteLocalAddress() ? NetworkArea.LAN : NetworkArea.WAN;
-                                tree.add(addr, area, NetworkStatus.Connecting);
-                                connect(addr).start();
+                                UdpConnection connection = connect(addr);
+                                hosts.addElement(new UdpConnectionElement(connection));
+                                connection.start();
                                 input.setText("");
                                 connectDialog.setVisible(false);
                             }
@@ -305,27 +246,36 @@ public class App extends JFrame
             host
         ).onConnect(
             () -> {
-                if (host.equals(stun)) return;
-                NetworkArea area = host.getAddress().isSiteLocalAddress() ? NetworkArea.LAN : NetworkArea.WAN;
-                this.tree.update(host, area, NetworkStatus.Connected);
-                if (host.equals(this.selection)) {
+                UdpConnectionElement el = this.list.getSelectedValue();
+                if (el != null && el.getConnection().getHost().equals(host)) {
                     this.message.setEnabled(true);
                     this.send.setEnabled(true);
                 }
             }
         ).onDisconnect(
             () -> {
-                if (host.equals(stun)) return;
-                NetworkArea area = host.getAddress().isSiteLocalAddress() ? NetworkArea.LAN : NetworkArea.WAN;
-                this.tree.update(host, area, NetworkStatus.Connecting);
+                UdpConnectionElement el = this.list.getSelectedValue();
+                if (el != null && el.getConnection().getHost().equals(host)) {
+                    this.message.setEnabled(false);
+                    this.send.setEnabled(false);
+                    this.history.setText("");
+                }
             }
         ).onReceive(
             // message
             (data) -> {
-                if (!this.cache.containsKey(host)) this.cache.put(host, "");
                 String now = this.formatter.format(new Date());
-                this.cache.put(host, String.format("%s%s -> %s\n", history.getText(), now, new String(data, CHARSET)));
-                if (host.equals(this.selection)) history.setText(this.cache.get(host));
+                Enumeration<UdpConnectionElement> enumeration = this.hosts.elements();
+                while (enumeration.hasMoreElements()) {
+                    UdpConnectionElement el = enumeration.nextElement();
+                    if (el.getConnection().getHost().equals(host)) {
+                        el.setHistory(String.format("%s%s -> %s\n", el.getHistory(), now, new String(data, CHARSET)));
+                    }
+                }
+                UdpConnectionElement el = this.list.getSelectedValue();
+                if (el != null && el.getConnection().getHost().equals(host)) {
+                    this.history.setText(el.getHistory());
+                }
             }
         );
     }
@@ -357,11 +307,16 @@ public class App extends JFrame
             UdpConnectionManager.getPort()
         ).onReceive(
             host -> {
-                Map<InetSocketAddress, HostTreeNode> mapping = this.tree.getMapping(NetworkArea.LAN);
-                if (!mapping.containsKey(host)) {
-                    this.tree.add(host, NetworkArea.LAN, NetworkStatus.Connecting);
-                    connect(host).start();
+                Enumeration<UdpConnectionElement> enumeration = this.hosts.elements();
+                while (enumeration.hasMoreElements()) {
+                    UdpConnectionElement el = enumeration.nextElement();
+                    if (el.getConnection().getHost().equals(host)) {
+                        return;
+                    }
                 }
+                UdpConnection connection = connect(host);
+                hosts.addElement(new UdpConnectionElement(connection));
+                connection.start();
             }
         );
         this.becon.start();
@@ -371,11 +326,14 @@ public class App extends JFrame
 
     private void sendMessage() {
         try {
-            UdpConnectionManager.get(this.selection).send(ByteBuffer.wrap(message.getText().getBytes(CHARSET)));
-            String now = this.formatter.format(new Date());
-            history.setText(String.format("%s%s <- %s\n", history.getText(), now, message.getText()));
-            message.setText("");
-            this.cache.put(this.selection, this.history.getText());
+            UdpConnectionElement el = this.list.getSelectedValue();
+            if (el != null) {
+                el.getConnection().send(ByteBuffer.wrap(message.getText().getBytes(CHARSET)));
+                String now = this.formatter.format(new Date());
+                history.setText(String.format("%s%s <- %s\n", history.getText(), now, message.getText()));
+                message.setText("");
+                el.setHistory(this.history.getText());
+            }
         } catch (IOException e) {
             // TODO: Dialog
             logger.log(Level.ERROR, "message send error", e);

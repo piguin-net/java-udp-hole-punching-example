@@ -40,6 +40,20 @@ public class UdpConnectionManager {
         private Runnable onConnectEventListener;
         private Runnable onDisconnectEventListener;
         private Consumer<byte[]> onReceiveEventListener;
+        private Status status;
+
+        public enum Status {
+            Connecting("⛅"),
+            Connected("☀"),
+            Disconnected("☔");
+            private String icon;
+            public String getIcon() {
+                return this.icon;
+            }
+            private Status(String icon) {
+                this.icon = icon;
+            }
+        }
 
         public UdpConnection(InetSocketAddress host) {
             this.host = host;
@@ -49,6 +63,18 @@ public class UdpConnectionManager {
             
             logger.log(Level.INFO, "udp keepalive interval : {0}", interval);
             logger.log(Level.INFO, "udp keepalive timeout  : {0}", timeout);
+        }
+
+        public InetSocketAddress getHost() {
+            return this.host;
+        }
+
+        public Status getStatus() {
+            return this.status;
+        }
+
+        public void setStatus(Status status) {
+            this.status = status;
         }
 
         public UdpConnection config(long interval, long timeout) {
@@ -84,6 +110,8 @@ public class UdpConnectionManager {
         }
 
         private void receive(ByteBuffer buffer) {
+            this.status = Status.Connected;
+
             if (this.lastReceive == 0) {
                 if (this.onConnectEventListener != null) {
                     // TODO: 例外、別Thread
@@ -129,6 +157,7 @@ public class UdpConnectionManager {
                         if (this.onDisconnectEventListener != null) {
                             logger.log(Level.WARNING, "udp keepalive timeout : {0}", Utils.format(this.host));
                             this.lastReceive = 0;
+                            this.status = Status.Connecting;
                             // TODO: 例外、別Thread
                             this.onDisconnectEventListener.run();
                         }
@@ -142,6 +171,7 @@ public class UdpConnectionManager {
             }, String.format("UDP Keepalive(%s)", Utils.format(host)));
 
             this.active = true;
+            this.status = Status.Connecting;
             this.keepalive.start();
         }
 
@@ -150,6 +180,7 @@ public class UdpConnectionManager {
             logger.log(Level.INFO, "stop udp keepalive to {0}", Utils.format(host));
             this.active = false;
             this.keepalive.join();
+            this.status = Status.Disconnected;
         }
     }
 
