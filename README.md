@@ -4,6 +4,8 @@ JavaでUDP hole punchingによるP2P通信を行うサンプルです。
 暗号化は未実装のため、機密情報は送信しないでください。  
 マルチキャストが禁止されているなど、環境によっては正常に動作しない可能性があります。
 
+![Screenshot](https://raw.githubusercontent.com/piguin-net/java-udp-hole-punching-example/main/screenshot/java-udp-hole-punching-example.png)
+
 # 動作イメージ(ローカル接続)
 ```mermaid
 sequenceDiagram
